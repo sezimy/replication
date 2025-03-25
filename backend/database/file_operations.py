@@ -6,9 +6,14 @@ import base64
 from backend.interfaces.db_interface import MongoDBInterface
 
 class FileOperation(MongoDBInterface):
-    def __init__(self):
+    def __init__(self, data_dir=None):
+        # Use provided data directory or default to backend/data
+        if data_dir:
+            self.data_dir = data_dir
+        else:
+            self.data_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'data')
+        
         # Create data directory if it doesn't exist
-        self.data_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'data')
         os.makedirs(self.data_dir, exist_ok=True)
         
         # Create collection files if they don't exist
@@ -29,7 +34,7 @@ class FileOperation(MongoDBInterface):
             'messages': threading.Lock()
         }
         
-        print("Successfully initialized file-based storage")
+        print(f"Successfully initialized file-based storage in {self.data_dir}")
 
     def _load_collection(self, collection_name):
         """Load a collection from file"""

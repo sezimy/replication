@@ -7,6 +7,7 @@ from datetime import datetime
 import json
 import sys
 import os
+import time
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(__file__)))) # add parent directory to python path
 
@@ -30,8 +31,22 @@ class ClientApp:
         self.comm_handler = communication_interface
         
         host = os.getenv('CHAT_APP_HOST', '0.0.0.0')
-        port = int(os.getenv('CHAT_APP_PORT', '8081'))
-        self.comm_handler.start_server(host, port)
+        
+        # Try connecting to each replica server in order
+        connected = False
+        for port in [8091, 8092, 8093]:  # Try all replica client ports
+            try:
+                print(f"Trying to connect to server at {host}:{port}")
+                self.comm_handler.start_server(host, port)
+                connected = True
+                print(f"Successfully connected to server at {host}:{port}")
+                break
+            except Exception as e:
+                print(f"Failed to connect to {host}:{port}: {e}")
+        
+        if not connected:
+            print("Could not connect to any server. Please make sure at least one server is running.")
+            sys.exit(1)
         
         self.username = ""
         self.password = ""
@@ -46,7 +61,7 @@ class ClientApp:
         self.last_log_off = None
         self.view_count = 5
         self.messages_by_user = {}  # Store messages by user
-        threading.Thread(target=self.receive_messages, daemon=True).start()
+        self.periodic_check_messages()
 
     def read_exact(self, n):
         data = b''
@@ -410,13 +425,13 @@ class ClientApp:
         username = self.username_entry.get()
         password = self.password_entry.get()
         
-        # Reset error messages
-        self.username_error.config(text="")
-        self.password_error.config(text="")
-        
-        # Validate inputs
+        # Validate username and password
         username_valid, username_error = self.validate_username(username)
         password_valid, password_error = self.validate_password(password)
+        
+        # Clear previous error messages
+        self.username_error.config(text="")
+        self.password_error.config(text="")
         
         if not username_valid:
             self.username_error.config(text=username_error)
@@ -430,31 +445,81 @@ class ClientApp:
         # Proceed with login
         self.comm_handler.send_message(data)
         response = self.read_json_response()
-        if response[0]['type'] == 'S':
+        
+        # Handle potential None response from server
+        if not response:
+            messagebox.showerror("Error", "Server did not respond. Please try again later.")
+            return
+        
+        # Handle both list and dictionary response formats
+        if isinstance(response, list) and len(response) > 0:
+            resp = response[0]
+        elif isinstance(response, dict):
+            resp = response
+        else:
+            print(f"Unexpected response format: {type(response)}")
+            messagebox.showerror("Error", "Received invalid response format from server")
+            return
+            
+        if resp['type'] == 'S':
             self.username = username
             self.password = password
-            messagebox.showinfo("Success", response[0]['payload'])
+            messagebox.showinfo("Success", resp['payload'])
+            
+            # First request the user list
             self.request_user_list()
+            
+            # Wait for the user list response
+            user_list_response = self.read_json_response()
+            if user_list_response:
+                if isinstance(user_list_response, dict):
+                    self.receive_message_helper(user_list_response.get('type'), user_list_response.get('payload'))
+                elif isinstance(user_list_response, list):
+                    for msg in user_list_response:
+                        if isinstance(msg, dict):
+                            self.receive_message_helper(msg.get('type'), msg.get('payload'))
+            
+            # Explicitly request messages after login
+            print("Requesting messages after login")
+            message_request = self.serialize_message('GM', [username])  # 'GM' for Get Messages
+            self.comm_handler.send_message(message_request)
+            
+            # Wait for the message response
+            print("Waiting for message response...")
+            message_response = self.read_json_response()
+            if message_response:
+                print(f"Received message response: {type(message_response)}")
+                # Process the message response
+                if isinstance(message_response, dict):
+                    self.receive_message_helper(message_response.get('type'), message_response.get('payload'))
+                elif isinstance(message_response, list):
+                    for msg in message_response:
+                        if isinstance(msg, dict):
+                            self.receive_message_helper(msg.get('type'), msg.get('payload'))
+            
+            # Switch to chat screen
             self.chat_screen()
-            del response[0]['type']
-            del response[0]['payload']
-            for msg_type, payload in response[0].items():
-                print(f"Received message: {msg_type} with payload")
-                self.receive_message_helper(msg_type, payload)
+            
+            # Process additional data in the response
+            for key, value in resp.items():
+                if key not in ['type', 'payload']:
+                    print(f"Received message: {key} with payload")
+                    self.receive_message_helper(key, value)
         else:
-            messagebox.showerror("Error", response[0]['payload'])
+            messagebox.showerror("Error", resp['payload'])
 
     def register(self):
+        """Register a new user"""
         username = self.username_entry.get()
         password = self.password_entry.get()
         
-        # Reset error messages
-        self.username_error.config(text="")
-        self.password_error.config(text="")
-        
-        # Validate inputs
+        # Validate username and password
         username_valid, username_error = self.validate_username(username)
         password_valid, password_error = self.validate_password(password)
+        
+        # Clear previous error messages
+        self.username_error.config(text="")
+        self.password_error.config(text="")
         
         if not username_valid:
             self.username_error.config(text=username_error)
@@ -463,59 +528,127 @@ class ClientApp:
             self.password_error.config(text=password_error)
             return
     
-        
+        print(f"Attempting to register user: {username}")
         # Send registration request
-        self.comm_handler.send_message(self.serialize_message('R', [username, password]))
-        response = self.read_json_response()
-        if response[0]['type'] == 'S':
-            messagebox.showinfo("Success", response[0]['payload'])
-        else:
-            messagebox.showerror("Error", response[0]['payload'])
+        request = self.serialize_message('R', [username, password])
+        print(f"Sending request: {request}")
+        self.comm_handler.send_message(request)
+        print("Request sent, waiting for response...")
+        
+        # Add a timeout for the response
+        max_wait_time = 10  # seconds
+        start_time = time.time()
+        
+        while time.time() - start_time < max_wait_time:
+            try:
+                # Update the UI while waiting
+                self.root.update()
+                
+                # Try to read a response with a short timeout
+                response = self.read_json_response()
+                if response:  # Check if response is not empty
+                    print(f"Received response: {response}")
+                    
+                    # Handle both list and dictionary response formats
+                    if isinstance(response, list) and len(response) > 0:
+                        resp = response[0]
+                    elif isinstance(response, dict):
+                        resp = response
+                    else:
+                        print(f"Unexpected response format: {type(response)}")
+                        messagebox.showerror("Error", "Received invalid response format from server")
+                        return
+                    
+                    if resp['type'] == 'S':
+                        messagebox.showinfo("Success", resp['payload'])
+                        return
+                    else:
+                        messagebox.showerror("Error", resp['payload'])
+                        return
+                
+                # Small delay to prevent CPU hogging
+                time.sleep(0.1)
+            except Exception as e:
+                print(f"Error during registration: {e}")
+                import traceback
+                traceback.print_exc()
+                messagebox.showerror("Error", f"Registration failed: {str(e)}")
+                return
+        
+        # If we get here, we timed out
+        print("Registration timed out after waiting for response")
+        messagebox.showerror("Error", "Server did not respond in time. Please try again later.")
 
     def read_json_response(self) -> list:
         """Read complete JSON responses from the socket"""
-        buffer = b''
-        messages = []
-        
-        while True:
-            chunk = self.comm_handler.get_message(4096)
-            if not chunk:
-                return None
+        try:
+            # Use the get_message method from our socket handler which already handles timeouts
+            data = self.comm_handler.get_message(4096)
+            if not data:
+                # No data received, but don't print anything to avoid console flooding
+                return []  # Return empty list instead of None
             
-            buffer += chunk
+            # Try to decode the JSON
             try:
-                # Try to find complete JSON messages
-                decoded = buffer.decode('utf-8')
-                depth = 0
-                start = 0
+                decoded_data = data.decode('utf-8')
                 
-                for i, char in enumerate(decoded):
-                    if char == '{':
-                        if depth == 0:
-                            start = i
-                        depth += 1
-                    elif char == '}':
-                        depth -= 1
-                        if depth == 0:
-                            # Found a complete JSON message
-                            message = decoded[start:i+1]
-                            messages.append(json.loads(message))
-                            # Move start past this message
-                            start = i + 1
+                # Check if we have multiple JSON objects in the response
+                if decoded_data.count('}{') > 0:
+                    print("Detected multiple JSON objects in response, splitting them")
+                    # Split the response into individual JSON objects
+                    json_objects = []
+                    
+                    # Insert proper delimiters between JSON objects
+                    fixed_data = decoded_data.replace('}{', '},{')
+                    
+                    # Wrap in array brackets if not already present
+                    if not fixed_data.startswith('['):
+                        fixed_data = '[' + fixed_data
+                    if not fixed_data.endswith(']'):
+                        fixed_data = fixed_data + ']'
+                    
+                    try:
+                        # Parse the fixed JSON array
+                        json_objects = json.loads(fixed_data)
+                        return json_objects
+                    except json.JSONDecodeError as e:
+                        print(f"Error decoding multiple JSON objects: {e}")
+                        
+                        # Fallback: try to parse each object individually
+                        individual_jsons = []
+                        parts = decoded_data.replace('}{', '}|{').split('|')
+                        for part in parts:
+                            try:
+                                obj = json.loads(part)
+                                individual_jsons.append(obj)
+                            except json.JSONDecodeError:
+                                print(f"Could not parse part: {part[:50]}...")
+                        
+                        return individual_jsons
                 
-                # Keep any incomplete message in buffer
-                if start < len(decoded):
-                    buffer = decoded[start:].encode('utf-8')
+                # Single JSON object
+                response = json.loads(decoded_data)
+                
+                # Ensure we always return a consistent format
+                # If it's a dict, keep it as is
+                # If it's a list, keep it as is
+                # Otherwise, wrap it in a list
+                if isinstance(response, (dict, list)):
+                    return response
                 else:
-                    buffer = b''
-                
-                # If we have any messages, return them
-                if messages:
-                    return messages
-                
-            except (json.JSONDecodeError, UnicodeDecodeError):
-                # If we can't parse yet, keep reading
-                continue
+                    print(f"Unexpected response type: {type(response)}")
+                    return [{"type": "E", "payload": f"Unexpected response type: {type(response)}"}]
+                    
+            except json.JSONDecodeError as e:
+                print(f"Error decoding JSON: {e}")
+                print(f"Received data: {data[:100]}...")  # Show first 100 chars
+                return []
+            
+        except Exception as e:
+            print(f"Error reading response: {e}")
+            import traceback
+            traceback.print_exc()
+            return []
 
     def send_message(self):
         if not hasattr(self, 'current_contact'):
@@ -546,66 +679,58 @@ class ClientApp:
         
         self.message_entry.delete(0, tk.END)
 
-    def receive_messages(self):
-        """Register callback for receiving messages"""
-        while True:
-            try:
-                responses = self.read_json_response()
-                for response in responses:
-                    msg_type = response['type']
-                    payload = response['payload']
-                    print(f"Received JSON response - Type: {msg_type}")
-                    print(f"Payload: {payload}")
-                    if not self.receive_message_helper(msg_type, payload):
-                        return
-            except Exception as e:
-                print(f"Receive error: {e}")
-                break
-
-    def receive_message_helper(self, msg_type, payload) -> bool:
-        if msg_type == 'M':
-            sender, recipient, msg_content = self.serialization_interface.deserialize_message(payload)
-            self.chat_area.config(state='normal')
-            self.chat_area.insert(tk.END, f"[{sender}]: {msg_content}\n")
-            self.chat_area.config(state='disabled')
-
-            self.animate_message()
-
-        elif msg_type == 'B':  # Bulk message delivery (stored messages)
-            self.handle_bulk_messages(payload)
-        
-        elif msg_type == 'U':  # User list
-            print(f"User list: {payload}")
-            self.handle_user_list(payload)
-
-        elif msg_type == 'V':  # User stats
-            time_str, view_count = self.serialization_interface.deserialize_user_stats(payload)
-            self.view_count = view_count
-            if time_str is None or time_str == "None":
-                self.last_log_off = None
-            else:
-                try:
-                    self.last_log_off = datetime.fromisoformat(time_str)
-                except Exception as e:
-                    print(f"Error parsing datetime: {e}")
+    def receive_message_helper(self, msg_type, payload):
+        """Helper method to process received messages"""
+        try:
+            if msg_type == 'M':  # New message
+                sender, message = payload
+                self.handle_new_message(sender, message)
+                
+            elif msg_type == 'D':  # Delete message
+                message_id = payload
+                self.handle_delete_message(message_id)
+                
+            elif msg_type == 'U':  # User list
+                print(f"User list: {payload}")
+                self.handle_user_list(payload)
+                
+            elif msg_type == 'V':  # User stats
+                time_str, view_count = self.serialization_interface.deserialize_user_stats(payload)
+                self.view_count = view_count
+                if time_str is None or time_str == "None":
                     self.last_log_off = None
-            
-            # Update the UI
-            self.update_stats_display()
+                else:
+                    try:
+                        self.last_log_off = datetime.fromisoformat(time_str)
+                    except Exception as e:
+                        print(f"Error parsing datetime: {e}")
+                        self.last_log_off = None
+                
+                # Update the UI
+                self.update_stats_display()
+                
+            elif msg_type == 'S':  # For delete confirmation
+                if self.serialization_interface.deserialize_success(payload) == "Message deleted":
+                    messagebox.showinfo("Success", "Message deleted successfully")
+                elif self.serialization_interface.deserialize_success(payload) == "User deleted successfully":
+                    messagebox.showinfo("Success", "User deleted successfully")
+                    self.show_login_window()
+                
+            elif msg_type == 'E':  # Error
+                error_message = self.serialization_interface.deserialize_error(payload)
+                messagebox.showerror("Error", error_message)
+                
+            elif msg_type == 'BM':  # Bulk Messages (new format)
+                print(f"Received bulk messages: {len(payload)} threads")
+                return self.handle_bulk_messages(payload)
+                
+            return True
+        except Exception as e:
+            print(f"Error processing message: {e}")
+            import traceback
+            traceback.print_exc()
+            return False
 
-        elif msg_type == 'S':  # For delete confirmation
-            if self.serialization_interface.deserialize_success(payload) == "Message deleted":
-                messagebox.showinfo("Success", "Message deleted successfully")
-            elif self.serialization_interface.deserialize_success(payload) == "User deleted successfully":
-                messagebox.showinfo("Success", "Account deleted successfully")
-                print("Account deleted. Exiting application.")
-                self.root.quit()
-                sys.exit(0)
-            elif self.serialization_interface.deserialize_success(payload) == "View count updated":
-                messagebox.showinfo("Success", "View count updated successfully")
-        
-        return True
-    
     def animate_message(self):
         self.chat_area.config(state='normal')
         end = self.chat_area.index(tk.END)
@@ -830,7 +955,7 @@ class ClientApp:
         if self.username:  # If we're logged in, update log-off time
             try:
                 # Update log-off time before closing
-                data = self.serialize_message('O', [self.username])  # Special case for logout
+                data = self.serialize_message('O', {"username": self.username})  # Use dict format instead of list
                 self.comm_handler.send_message(data)
             except:
                 pass  # Don't prevent closing if this fails
@@ -840,6 +965,47 @@ class ClientApp:
         
         # Destroy the window
         self.root.destroy()
+
+    def periodic_check_messages(self):
+        """Periodically check for new messages"""
+        try:
+            self.check_messages()
+        except Exception as e:
+            # Only print serious errors, not timeouts
+            if not isinstance(e, socket.timeout):
+                print(f"Error in periodic check: {e}")
+        finally:
+            # Schedule the next check with a longer interval to reduce CPU usage
+            self.root.after(2000, self.periodic_check_messages)  # Check every 2 seconds instead of 1
+
+    def check_messages(self):
+        """Check for new messages"""
+        responses = self.read_json_response()
+        if not responses:  # Handle empty list case
+            return
+            
+        # Handle both list and dictionary response formats
+        if isinstance(responses, dict):
+            # Single response as dictionary
+            msg_type = responses.get('type')
+            payload = responses.get('payload')
+            if msg_type and payload:
+                # Only print actual messages, not empty responses
+                if msg_type != 'E':  
+                    print(f"Received message - Type: {msg_type}")
+                self.receive_message_helper(msg_type, payload)
+        elif isinstance(responses, list):
+            # Multiple responses as list
+            for response in responses:
+                if isinstance(response, dict):
+                    msg_type = response.get('type')
+                    payload = response.get('payload')
+                    if msg_type and payload:
+                        # Only print actual messages, not empty responses
+                        if msg_type != 'E':  
+                            print(f"Received message - Type: {msg_type}")
+                        if not self.receive_message_helper(msg_type, payload):
+                            return
 
 if __name__ == "__main__":
     # Use only JSON protocol

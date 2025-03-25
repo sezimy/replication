@@ -88,6 +88,9 @@ class ClientJsonProtocol(ClientSerializationInterface):
         """Deserialize bulk messages"""
         messages_to_process = []
         
+        print(f"Deserializing bulk messages: {type(payload)}")
+        print(f"Payload content sample: {str(payload)[:200]}...")
+        
         # If payload is already a dictionary, use it directly
         if isinstance(payload, dict):
             message_dict = payload
@@ -103,6 +106,8 @@ class ClientJsonProtocol(ClientSerializationInterface):
         for user, messages in message_dict.items():
             if user not in messages_by_user:
                 messages_by_user[user] = []
+            
+            print(f"Processing {len(messages)} messages for user {user}")
             
             for msg in messages:
                 try:
@@ -133,13 +138,20 @@ class ClientJsonProtocol(ClientSerializationInterface):
                     receiver = msg.get('receiver', 'Unknown')
                     message = msg.get('message', '')
                     
+                    # Format the message for display
                     formatted_msg = f"[{timestamp_str}] [{sender} -> {receiver}]: {message}"
+                    print(f"Formatted message: {formatted_msg}")
+                    
+                    # Add to the user's message list
                     messages_by_user[user].append(formatted_msg)
                     messages_to_process.append((user, formatted_msg))
                 except Exception as e:
                     print(f"Error processing message: {e}")
+                    import traceback
+                    traceback.print_exc()
                     continue
         
+        print(f"Processed {len(messages_to_process)} total messages")
         return messages_to_process
 
     def deserialize_user_list(self, payload: list) -> List[str]:
@@ -169,6 +181,12 @@ class ClientJsonProtocol(ClientSerializationInterface):
 
     def deserialize_success(self, payload: str) -> str:
         """Deserialize success message"""
+        if isinstance(payload, dict) or isinstance(payload, list):
+            return json.dumps(payload)
+        return payload
+
+    def deserialize_error(self, payload: str) -> str:
+        """Deserialize error message"""
         if isinstance(payload, dict) or isinstance(payload, list):
             return json.dumps(payload)
         return payload

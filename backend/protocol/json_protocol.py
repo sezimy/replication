@@ -54,6 +54,44 @@ class JsonProtocol(SerializationInterface):
         }
         return json.dumps(data).encode('utf-8')
 
+    def serialize_messages(self, messages_dict: dict) -> bytes:
+        """
+        Serialize a dictionary of messages for a specific user.
+        
+        Args:
+            messages_dict: Dictionary of messages by user
+            
+        Returns:
+            Serialized message data
+        """
+        # Format the messages for JSON serialization
+        formatted_messages = {}
+        for user, messages in messages_dict.items():
+            formatted_messages[user] = []
+            for msg in messages:
+                # Ensure timestamp is properly formatted
+                timestamp = msg["timestamp"]
+                if not isinstance(timestamp, str):
+                    timestamp = timestamp.isoformat()
+                
+                formatted_msg = {
+                    "sender": msg["sender"],
+                    "receiver": msg["receiver"],
+                    "message": msg["message"],
+                    "timestamp": timestamp,
+                    "_id": msg.get("_id", "")
+                }
+                formatted_messages[user].append(formatted_msg)
+        
+        # Create the response
+        data = {
+            "type": "BM",  # Bulk Messages
+            "payload": formatted_messages
+        }
+        
+        # Serialize to JSON and encode as bytes
+        return json.dumps(data).encode('utf-8')
+
     def serialize_user_list(self, users: list) -> bytes:
         data = {
             "type": "U",
@@ -95,5 +133,19 @@ class JsonProtocol(SerializationInterface):
         print(f"Deserialized json view count update: {payload}")
         return payload.get("username"), payload.get("new_count")
     
-    def deserialize_log_off(self, payload: list) -> str:
-        return payload.get("username")
+    def deserialize_log_off(self, payload) -> str:
+        """Deserialize log-off message to extract username
+        
+        Args:
+            payload: Could be a list [username] or a dict {"username": username}
+            
+        Returns:
+            The username as a string
+        """
+        if isinstance(payload, dict):
+            return payload.get("username")
+        elif isinstance(payload, list) and len(payload) > 0:
+            return payload[0]
+        else:
+            print(f"Invalid log-off payload format: {payload}")
+            return None
