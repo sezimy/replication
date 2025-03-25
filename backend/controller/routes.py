@@ -75,13 +75,78 @@ class Controller:
                     user_data = self.business_logic.get_user(username)
                     messages = self.business_logic.get_messages(username)
                     
-                    # Create a combined response with login success and user data
-                    response = self.json_protocol.serialize_success("Login successful")
+                    # Extract user stats
+                    log_off_time = None
+                    view_count = 5  # Default
                     
-                    # Return the response
-                    return response
+                    if user_data and len(user_data) > 0:
+                        # Use the first user document (there might be multiple with same username)
+                        user_doc = user_data[0]
+                        log_off_time = user_doc.get('log_off_time')
+                        view_count = user_doc.get('view_count', 5)
+                    
+                    # Just return a simple success response
+                    # We'll handle user stats separately
+                    return self.json_protocol.serialize_success("Login successful")
                 else:
                     return self.json_protocol.serialize_error("Invalid username or password")
+            elif msg_type == 'GS':  # Get User Stats
+                print(f"Received GS request with payload: {payload}, type: {type(payload)}")
+                
+                # Handle different payload formats
+                username = None
+                try:
+                    if isinstance(payload, list) and len(payload) > 0:
+                        username = payload[0]
+                        print(f"Extracted username from list: {username}")
+                    elif isinstance(payload, dict):
+                        username = payload.get("username")
+                        print(f"Extracted username from dict: {username}")
+                    else:
+                        print(f"Invalid payload format for GS request: {payload}")
+                        return self.json_protocol.serialize_error("Invalid payload format")
+                except Exception as e:
+                    print(f"Error extracting username from payload: {e}")
+                    return self.json_protocol.serialize_error(f"Error extracting username: {e}")
+                
+                if not username:
+                    print("Missing username in GS request")
+                    return self.json_protocol.serialize_error("Missing username")
+                
+                try:
+                    # Get user data
+                    user_data = self.business_logic.get_user(username)
+                    print(f"User data for stats: {user_data}, type: {type(user_data)}")
+                    
+                    # Extract user stats
+                    log_off_time = None
+                    view_count = 5  # Default
+                    
+                    # Handle different return types from get_user
+                    if isinstance(user_data, list) and len(user_data) > 0:
+                        # Use the first user document (there might be multiple with same username)
+                        user_doc = user_data[0]
+                        log_off_time = user_doc.get('log_off_time')
+                        view_count = user_doc.get('view_count', 5)
+                        print(f"Found stats from list: log_off_time={log_off_time}, view_count={view_count}")
+                    elif isinstance(user_data, dict):
+                        # User data is already a single document
+                        log_off_time = user_data.get('log_off_time')
+                        view_count = user_data.get('view_count', 5)
+                        print(f"Found stats from dict: log_off_time={log_off_time}, view_count={view_count}")
+                    else:
+                        print(f"No user data found for username: {username}")
+                    
+                    # Return user stats
+                    response = self.json_protocol.serialize_user_stats(log_off_time, view_count)
+                    print(f"Sending user stats response: {response}")
+                    return response
+                except Exception as e:
+                    import traceback
+                    error_traceback = traceback.format_exc()
+                    print(f"Error processing user stats: {e}")
+                    print(f"Traceback: {error_traceback}")
+                    return self.json_protocol.serialize_error(f"Error processing user stats: {e}")
             elif msg_type == 'M':  # Message
                 sender, receiver, message = self.json_protocol.deserialize_message(payload)
                 
@@ -175,8 +240,11 @@ class Controller:
                 return self.json_protocol.serialize_error("Invalid message type")
                 
         except Exception as e:
+            import traceback
+            error_traceback = traceback.format_exc()
             print(f"Error processing message: {e}")
-            return self.json_protocol.serialize_error(str(e))
+            print(f"Traceback: {error_traceback}")
+            return self.json_protocol.serialize_error(f"Error: {str(e)}")
 
 def handle_client_request(data, client_socket):
     """Handle a client request"""
@@ -220,9 +288,10 @@ def handle_client_request(data, client_socket):
         
         return response
     except Exception as e:
-        print(f"Error handling client request: {e}")
         import traceback
-        traceback.print_exc()
+        error_traceback = traceback.format_exc()
+        print(f"Error handling client request: {e}")
+        print(f"Traceback: {error_traceback}")
         
         # Send an error response to the client
         error_message = f"Error processing request: {str(e)}"

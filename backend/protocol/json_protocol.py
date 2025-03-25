@@ -101,10 +101,34 @@ class JsonProtocol(SerializationInterface):
 
     def serialize_user_stats(self, log_off_time, view_count: int) -> bytes:
         try:
+            # Add debug print to see what values we're getting
+            print(f"Serializing user stats with log_off_time: {log_off_time}, view_count: {view_count}")
+            
+            # Ensure view_count is an integer
+            if view_count is None:
+                view_count = 0
+            else:
+                try:
+                    view_count = int(view_count)
+                except (ValueError, TypeError):
+                    view_count = 0
+            
+            # Handle log_off_time properly
+            if log_off_time is None:
+                log_off_time_str = None
+            elif isinstance(log_off_time, str):
+                log_off_time_str = log_off_time
+            else:
+                try:
+                    log_off_time_str = log_off_time.isoformat()
+                except Exception as e:
+                    print(f"Error formatting log_off_time: {e}")
+                    log_off_time_str = None
+            
             data = {
                 "type": "V",
                 "payload": {
-                    "log_off_time": log_off_time if isinstance(log_off_time, str) or log_off_time is None else log_off_time.isoformat(),
+                    "log_off_time": log_off_time_str,
                     "view_count": view_count
                     }
                 }
@@ -112,6 +136,15 @@ class JsonProtocol(SerializationInterface):
             return json.dumps(data).encode('utf-8')
         except Exception as e:
             print(f"Error serializing user stats: {e}")
+            # Return a valid response even if there's an error
+            fallback_data = {
+                "type": "V",
+                "payload": {
+                    "log_off_time": None,
+                    "view_count": 0
+                    }
+                }
+            return json.dumps(fallback_data).encode('utf-8')
 
     # Deserialization methods
     def deserialize_register(self, payload: list) -> tuple[str, str]:

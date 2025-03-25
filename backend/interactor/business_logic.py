@@ -59,12 +59,20 @@ class BusinessLogic(BusinessLogicInterface):
             print(f"Error deleting user and messages: {e}")
             return False
 
-    def get_user(self, user_name) -> dict:
+    def get_user(self, user_name) -> list:
+        """Get user document(s) by username
+        
+        Args:
+            user_name: The username to look up
+            
+        Returns:
+            A list of user documents matching the username
+        """
         query = {"user_name": user_name}
         user_docs = self.db_operations.read("users", query)
-        # Return the first user document if found, otherwise empty dict
+        # Return the user documents list
         print(f"Getting user document: {user_docs}")
-        return user_docs[0] if user_docs else {}
+        return user_docs
     
     def get_all_users(self) -> list:
         docs = self.db_operations.read("users", {}) or []

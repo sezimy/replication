@@ -479,6 +479,37 @@ class ClientApp:
                         if isinstance(msg, dict):
                             self.receive_message_helper(msg.get('type'), msg.get('payload'))
             
+            # Request user stats
+            print("Requesting user stats")
+            stats_request = self.serialize_message('GS', [username])
+            print(f"Stats request: {stats_request}")
+            self.comm_handler.send_message(stats_request)
+            
+            # Wait for the stats response
+            print("Waiting for stats response...")
+            stats_response = self.read_json_response()
+            print(f"Raw stats response: {stats_response}")
+            if stats_response:
+                print(f"Received stats response type: {type(stats_response)}")
+                if isinstance(stats_response, dict):
+                    # Check if it's an error response
+                    if stats_response.get('type') == 'E':
+                        print(f"Error getting user stats: {stats_response.get('payload')}")
+                        # Don't stop the login process for stats errors
+                    else:
+                        print(f"Processing stats response with type: {stats_response.get('type')}")
+                        self.receive_message_helper(stats_response.get('type'), stats_response.get('payload'))
+                elif isinstance(stats_response, list):
+                    for msg in stats_response:
+                        if isinstance(msg, dict):
+                            # Check if it's an error response
+                            if msg.get('type') == 'E':
+                                print(f"Error getting user stats: {msg.get('payload')}")
+                                # Don't stop the login process for stats errors
+                            else:
+                                print(f"Processing stats response with type: {msg.get('type')}")
+                                self.receive_message_helper(msg.get('type'), msg.get('payload'))
+            
             # Explicitly request messages after login
             print("Requesting messages after login")
             message_request = self.serialize_message('GM', [username])  # 'GM' for Get Messages
@@ -1006,6 +1037,20 @@ class ClientApp:
                             print(f"Received message - Type: {msg_type}")
                         if not self.receive_message_helper(msg_type, payload):
                             return
+
+    def show_login_window(self):
+        """
+        Reset the client state and show the login screen after user deletion
+        """
+        self.username = ""
+        self.password = ""
+        self.messages_by_user = {}
+        self.user_list = []
+        self.last_log_off = None
+        self.view_count = 5
+        
+        # Show the login screen
+        self.login_screen()
 
 if __name__ == "__main__":
     # Use only JSON protocol
