@@ -593,11 +593,11 @@ class ReplicationManager:
                     else:
                         print(f"Have primary {self.primary_id}, skipping election")
                 elif self.role == ServerRole.CANDIDATE:
-                    # If we've been CANDIDATE too long, start new election
+                    # If we've been CANDIDATE too long, assume we are primary
                     current_time = time.time()
                     if current_time - self.last_heartbeat_time > timeout:
                         print(f"Election timed out after {current_time - self.last_heartbeat_time:.1f} seconds, starting new election")
-                        should_start_election = True
+                        self.role = ServerRole.PRIMARY
                 else:
                     print(f"Not starting election - current role is {self.role}")
             
