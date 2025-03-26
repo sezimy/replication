@@ -7,6 +7,13 @@ import os
 sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(__file__)))) # add parent directory to python path
 from interfaces.client_communication_interface import ClientCommunicationInterface
 
+# Define server addresses with their actual IPs
+SERVER_ADDRESSES = [
+    ('10.250.103.230', 8091),  # Replace with actual IP of server 1
+    ('10.250.103.230', 8092),  # Replace with actual IP of server 2
+    ('10.250.145.247', 8093)   # Replace with actual IP of server 3
+]
+
 class ClientSocketHandler(ClientCommunicationInterface):
         
     def __init__(self):
@@ -43,9 +50,8 @@ class ClientSocketHandler(ClientCommunicationInterface):
         """Try to reconnect to any available server. Returns (success, new_address)"""
         try:
             
-            # Try all ports again
-            host = os.getenv('CHAT_APP_HOST', '0.0.0.0')
-            for port in [8091, 8092, 8093]:
+            # Try all servers
+            for host, port in SERVER_ADDRESSES:
                 try:
                     print(f"Attempting to reconnect to server at {host}:{port}")
                     self.server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
