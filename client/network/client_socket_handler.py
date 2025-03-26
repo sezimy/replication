@@ -11,7 +11,8 @@ from interfaces.client_communication_interface import ClientCommunicationInterfa
 SERVER_ADDRESSES = [
     ('10.250.103.230', 8091),  # Replace with actual IP of server 1
     ('10.250.103.230', 8092),  # Replace with actual IP of server 2
-    ('10.250.145.247', 8093)   # Replace with actual IP of server 3
+    ('10.250.145.247', 8093),  # Race with actual IP of server 3
+       
 ]
 
 class ClientSocketHandler(ClientCommunicationInterface):

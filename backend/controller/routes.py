@@ -363,6 +363,8 @@ def start_server():
     
     # Initialize the replication manager
     local_address = (args.host, args.port)
+    if local_address not in replicas:
+        replicas.append(local_address)
     replication_manager = ReplicationManager(
         server_id=args.id,
         data_dir=args.data_dir,

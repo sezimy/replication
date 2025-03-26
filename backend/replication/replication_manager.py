@@ -200,7 +200,10 @@ class ReplicationManager:
                     print(f"ReplicationManager: This server is BACKUP, forwarding to PRIMARY ({self.primary_id})")
                     # Find the primary's address
                     primary_address = None
+                    print(f"ReplicationManager: Replica addresses: {self.replica_addresses}")
                     for replica in self.replica_addresses:
+                        print(f"ReplicationManager: Replica address: {replica}")
+                        print(f"primary_id: {self.primary_id}")
                         if self._get_server_id_from_address(replica) == self.primary_id:
                             primary_address = replica
                             break
@@ -565,13 +568,12 @@ class ReplicationManager:
     def _election_timeout_loop(self):
         """Check for election timeout and start election if needed."""
         while self.running:
-            # Random election timeout between 1.5 and 3 seconds
             timeout = random.uniform(1.5, 3.0)
             time.sleep(timeout)
             
             should_start_election = False
             with self.state_lock:
-                # Only start election if we're a backup and haven't received a heartbeat
+                # Start election if we're BACKUP with no heartbeat OR if we're a CANDIDATE that hasn't won yet
                 if self.role == ServerRole.BACKUP:
                     print(f"Server {self.server_id} considering election (current term: {self.current_term})")
                     print(f"Current replica_addresses: {self.replica_addresses}")
@@ -590,6 +592,12 @@ class ReplicationManager:
                         should_start_election = True
                     else:
                         print(f"Have primary {self.primary_id}, skipping election")
+                elif self.role == ServerRole.CANDIDATE:
+                    # If we've been CANDIDATE too long, start new election
+                    current_time = time.time()
+                    if current_time - self.last_heartbeat_time > timeout:
+                        print(f"Election timed out after {current_time - self.last_heartbeat_time:.1f} seconds, starting new election")
+                        should_start_election = True
                 else:
                     print(f"Not starting election - current role is {self.role}")
             
@@ -654,7 +662,7 @@ class ReplicationManager:
             except Exception as e:
                 print(f"Error requesting vote from {replica}: {e}")
     
-    def _get_server_id_from_address(self, address: Tuple[str, int]) -> str:
+    def _get_server_id_from_address(self, given_address: Tuple[str, int]) -> str:
         """
         Convert a server address to a server ID.
         
@@ -664,7 +672,12 @@ class ReplicationManager:
         Returns:
             Server ID string
         """
-        return f"{address[0]}:{address[1]}"
+        SERVER_ADDRESSES = {
+            ('10.250.103.230', 8081): "replica1",  # Replace with actual IP of server 1
+            ('10.250.103.230', 8082): "replica2",  # Replace with actual IP of server 2
+            ('10.250.145.247', 8083): "replica3"   # Replace with actual IP of server 3
+        }
+        return SERVER_ADDRESSES.get(given_address, None)
     
     def is_primary(self) -> bool:
         """Check if this server is the primary."""
