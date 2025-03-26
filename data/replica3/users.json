@@ -1,0 +1,22 @@
+[
+  {
+    "user_name": "doug",
+    "user_password": {
+      "__type__": "bytes",
+      "data": "JDJiJDEyJG9uMVZnYThaWkNuYVprTVFqVVBsZ08vZ05oeGg2MEwycGVvNUpLYVRwZnprRUtTSFdqREh5"
+    },
+    "view_count": 5,
+    "log_off_time": null,
+    "_id": "1742972659.203736_0"
+  },
+  {
+    "user_name": "sezim",
+    "user_password": {
+      "__type__": "bytes",
+      "data": "JDJiJDEyJHBKNC80bE5BR2ZxbDg2RWNoTWVEeC55aHFiLk96R3RmYUhCMWJuZFA1SE5ZZGdkSWYuNy95"
+    },
+    "view_count": 5,
+    "log_off_time": null,
+    "_id": "1742972662.26685_1"
+  }
+]

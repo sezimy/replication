@@ -1,0 +1,23 @@
+[
+  {
+    "sender": "doug",
+    "receiver": "sezim",
+    "message": "yo!",
+    "timestamp": "2025-03-26T03:23:14.824981",
+    "_id": "1742973794.825106_0"
+  },
+  {
+    "sender": "doug",
+    "receiver": "sezim",
+    "message": "hi",
+    "timestamp": "2025-03-26T03:40:31.888519",
+    "_id": "1742974831.88918_1"
+  },
+  {
+    "sender": "doug",
+    "receiver": "sezim",
+    "message": "hi",
+    "timestamp": "2025-03-26T03:58:35.196002",
+    "_id": "1742975915.196408_2"
+  }
+]

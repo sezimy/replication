@@ -714,8 +714,12 @@ class ClientApp:
         """Helper method to process received messages"""
         try:
             if msg_type == 'M':  # New message
-                sender, message = payload
-                self.handle_new_message(sender, message)
+                sender, receiver, message = self.serialization_interface.deserialize_message(payload)
+                self.chat_area.config(state='normal')
+                self.chat_area.insert(tk.END, f"[{sender} -> {receiver}]: {message}\n")
+                self.chat_area.config(state='disabled')
+
+                self.animate_message()
                 
             elif msg_type == 'D':  # Delete message
                 message_id = payload
@@ -746,6 +750,8 @@ class ClientApp:
                 elif self.serialization_interface.deserialize_success(payload) == "User deleted successfully":
                     messagebox.showinfo("Success", "User deleted successfully")
                     self.show_login_window()
+                elif self.serialization_interface.deserialize_success(payload) == "View count updated":
+                    messagebox.showinfo("Success", "View count updated successfully")
                 
             elif msg_type == 'E':  # Error
                 error_message = self.serialization_interface.deserialize_error(payload)

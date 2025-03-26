@@ -48,7 +48,7 @@ class Controller:
         print(f"Client socket: {client_socket}")
         
         try:
-            return replication_manager.handle_client_operation(data)
+            return replication_manager.handle_client_operation(data,client_socket)
         except Exception as e:
             print(f"Error handling incoming message: {e}")
             return self.json_protocol.serialize_error(f"Error: {str(e)}")
@@ -80,6 +80,7 @@ class Controller:
                     # Track the user as online
                     if client_socket:
                         with self.lock:
+                            print(f"Lock acquired, adding {username} to online_users")
                             self.online_users[username] = client_socket
                     
                     # Get user data and messages
@@ -168,25 +169,32 @@ class Controller:
                 if success:
                     # Create a notification message for the receiver
                     notification = {
-                        "type": "N",  # Notification
+                        "type": "M",  # Notification
                         "payload": {
                             "sender": sender,
+                            "recipient": receiver,
                             "message": message,
-                            "timestamp": str(time.time())
                         }
                     }
                     
                     # Check if receiver is online
+                    print(f"Attempting to acquire lock to check if {receiver} is online")
+                    print(f"Current online users: {self.online_users}")
                     with self.lock:
+                        print(f"Lock acquired, checking if {receiver} is in online_users")
                         if receiver in self.online_users:
                             try:
                                 # Send notification to receiver
                                 receiver_socket = self.online_users[receiver]
+                                print(f"Found socket for {receiver} in online_users")
                                 notification_data = json.dumps(notification).encode('utf-8')
                                 receiver_socket.sendall(notification_data)
                                 print(f"Sent notification to {receiver}")
                             except Exception as e:
                                 print(f"Error sending notification to {receiver}: {e}")
+                        else:
+                            print(f"Receiver {receiver} not found in online_users")
+                    print(f"Lock released after checking {receiver}")
                     
                     return self.json_protocol.serialize_success("Message sent successfully")
                 else:

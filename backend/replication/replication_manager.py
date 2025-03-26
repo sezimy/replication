@@ -127,7 +127,7 @@ class ReplicationManager:
         if self.replication_socket:
             self.replication_socket.close()
     
-    def handle_client_operation(self, data: bytes) -> bytes:
+    def handle_client_operation(self, data: bytes, client_socket: socket.socket=None) -> bytes:
         """
         Handle a client operation, possibly forwarding to the primary.
         
@@ -175,7 +175,7 @@ class ReplicationManager:
                         
                         print("ReplicationManager: About to call client_handler")
                         print(f"ReplicationManager: client_handler type: {type(self.client_handler)}")
-                        response = self.client_handler(data, None)
+                        response = self.client_handler(data, client_socket)
                         print(f"ReplicationManager: client_handler returned response type: {type(response)}")
                         
                         # For write operations, replicate to backups
