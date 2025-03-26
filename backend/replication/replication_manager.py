@@ -46,6 +46,7 @@ class ReplicationManager:
         self.current_term = 0  # Election term
         self.voted_for = None
         self.active_replicas = set()
+        self.last_heartbeat_time = 0  # Track last heartbeat time
         
         # Communication sockets
         self.replication_socket = None
@@ -70,6 +71,7 @@ class ReplicationManager:
         
     def start(self):
         """Start the replication manager and all its threads."""
+        print(f"Starting replication manager for server {self.server_id}")
         self.running = True
         
         # Start replication listener
@@ -78,11 +80,14 @@ class ReplicationManager:
         self.replication_socket.bind(self.local_address)
         self.replication_socket.listen(10)
         
+        print(f"Started replication listener on {self.local_address}")
+        
         self.replication_listener_thread = threading.Thread(target=self._replication_listener)
         self.replication_listener_thread.daemon = True
         self.replication_listener_thread.start()
         
         # Start an election immediately
+        print(f"Starting initial election for server {self.server_id}")
         self._start_election()
         
         # Wait for election to complete (up to 5 seconds)
@@ -104,6 +109,8 @@ class ReplicationManager:
                 self.current_term += 1
                 print(f"Server {self.server_id} elected as PRIMARY for term {self.current_term}")
         
+        print(f"Server {self.server_id} final role: {self.role}, primary_id: {self.primary_id}")
+        
         # Start heartbeat thread
         self.heartbeat_thread = threading.Thread(target=self._heartbeat_loop)
         self.heartbeat_thread.daemon = True
@@ -120,7 +127,7 @@ class ReplicationManager:
         if self.replication_socket:
             self.replication_socket.close()
     
-    def handle_client_operation(self, operation_type: str, data: bytes) -> bytes:
+    def handle_client_operation(self, data: bytes) -> bytes:
         """
         Handle a client operation, possibly forwarding to the primary.
         
@@ -131,71 +138,107 @@ class ReplicationManager:
         Returns:
             Response bytes to send back to the client
         """
-        print(f"ReplicationManager: Handling {operation_type} operation")
+        print(f"ReplicationManager: Handling data: {data}")
+        print(f"ReplicationManager: Current server state - Role: {self.role}, Primary ID: {self.primary_id}, Term: {self.current_term}")
         
-        with self.state_lock:
-            # If this server is the primary, process the operation
-            if self.role == ServerRole.PRIMARY:
-                print(f"ReplicationManager: This server ({self.server_id}) is PRIMARY, processing locally")
-                # Process the operation locally
-                try:
-                    # Extract the message type for logging
-                    try:
-                        msg_type = data.decode('utf-8')[2:3]  # Usually the message type is at position 2
-                        print(f"ReplicationManager: Processing operation of type '{msg_type}'")
-                    except:
-                        print("ReplicationManager: Could not extract message type")
-                    
-                    response = self.client_handler(data, None)
-                    
-                    # For write operations, replicate to backups
-                    if self._is_write_operation(data):
-                        print("ReplicationManager: This is a write operation, replicating to backups")
-                        self._replicate_operation(data)
-                    
-                    print(f"ReplicationManager: Operation processed successfully, response length: {len(response) if response else 0}")
-                    return response
-                except Exception as e:
-                    print(f"ReplicationManager: Error processing operation: {e}")
-                    import traceback
-                    traceback.print_exc()
-                    error_response = {"type": "E", "payload": f"Error processing request: {str(e)}"}
-                    return json.dumps([error_response]).encode('utf-8')
+        # Try multiple times in case we're in an election
+        max_retries = 3
+        retry_delay = 0.5  # seconds
+        
+        for attempt in range(max_retries):
+            print(f"ReplicationManager: Attempt {attempt + 1}/{max_retries}")
+            print(f"ReplicationManager: Lock status before acquiring - Is locked: {self.state_lock.locked()}")
+            if self.state_lock.locked():
+                print("ReplicationManager: WARNING - Lock is currently held by another thread!")
+                # Let's try to identify which thread might be holding it
+                import threading
+                current_thread = threading.current_thread()
+                print(f"ReplicationManager: Current thread: {current_thread.name}")
+                print(f"ReplicationManager: All active threads:")
+                for thread in threading.enumerate():
+                    print(f"  - {thread.name}")
             
-            # If this server knows who the primary is, forward the request
-            elif self.primary_id is not None:
-                print(f"ReplicationManager: This server is BACKUP, forwarding to PRIMARY ({self.primary_id})")
-                # Find the primary's address
-                primary_address = None
-                for replica in self.replica_addresses:
-                    if self._get_server_id_from_address(replica) == self.primary_id:
-                        primary_address = replica
-                        break
+            with self.state_lock:
+                print(f"ReplicationManager: Successfully acquired lock")
                 
-                if primary_address:
-                    # Forward the request to the primary
+                # If this server is the primary, process the operation
+                if self.role == ServerRole.PRIMARY:
+                    print(f"ReplicationManager: This server ({self.server_id}) is PRIMARY, processing locally")
+                    # Process the operation locally
                     try:
-                        print(f"ReplicationManager: Forwarding request to primary at {primary_address}")
-                        client_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-                        client_sock.settimeout(5)  # 5 second timeout
-                        client_sock.connect(primary_address)
-                        client_sock.sendall(data)
-                        response = client_sock.recv(4096)
-                        client_sock.close()
-                        print(f"ReplicationManager: Received response from primary, length: {len(response)}")
+                        # Extract the message type for logging
+                        try:
+                            msg_type = data.decode('utf-8')[2:3]  # Usually the message type is at position 2
+                            print(f"ReplicationManager: Processing operation of type '{msg_type}'")
+                        except:
+                            print("ReplicationManager: Could not extract message type")
+                        
+                        print("ReplicationManager: About to call client_handler")
+                        print(f"ReplicationManager: client_handler type: {type(self.client_handler)}")
+                        response = self.client_handler(data, None)
+                        print(f"ReplicationManager: client_handler returned response type: {type(response)}")
+                        
+                        # For write operations, replicate to backups
+                        if self._is_write_operation(data):
+                            print("ReplicationManager: This is a write operation, replicating to backups")
+                            self._replicate_operation(data)
+                        
+                        print(f"ReplicationManager: Operation processed successfully, response length: {len(response) if response else 0}")
+                        if response:
+                            print(f"ReplicationManager: Response content: {response[:100]}")
                         return response
                     except Exception as e:
-                        print(f"ReplicationManager: Error forwarding to primary: {e}")
-                        # Primary might be down, start a new election
-                        self._start_election()
-                        # Return error to client
-                        error_response = {"type": "E", "payload": "Primary server unavailable, trying to elect new primary"}
+                        print(f"ReplicationManager: Error processing operation: {e}")
+                        print("ReplicationManager: Full error traceback:")
+                        import traceback
+                        traceback.print_exc()
+                        error_response = {"type": "E", "payload": f"Error processing request: {str(e)}"}
                         return json.dumps([error_response]).encode('utf-8')
+                
+                # If this server knows who the primary is, forward the request
+                elif self.primary_id is not None:
+                    print(f"ReplicationManager: This server is BACKUP, forwarding to PRIMARY ({self.primary_id})")
+                    # Find the primary's address
+                    primary_address = None
+                    for replica in self.replica_addresses:
+                        if self._get_server_id_from_address(replica) == self.primary_id:
+                            primary_address = replica
+                            break
+                    
+                    if primary_address:
+                        # Forward the request to the primary
+                        try:
+                            print(f"ReplicationManager: Forwarding request to primary at {primary_address}")
+                            client_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                            client_sock.settimeout(5)  # 5 second timeout
+                            client_sock.connect(primary_address)
+                            client_sock.sendall(data)
+                            response = client_sock.recv(4096)
+                            client_sock.close()
+                            print(f"ReplicationManager: Received response from primary, length: {len(response)}")
+                            return response
+                        except Exception as e:
+                            print(f"ReplicationManager: Error forwarding to primary: {e}")
+                            if attempt < max_retries - 1:
+                                print(f"Retrying after error (attempt {attempt + 1}/{max_retries})")
+                                # Primary might be down, start a new election
+                                self._start_election()
+                                time.sleep(retry_delay)
+                                continue
+                            # Return error to client on last attempt
+                            error_response = {"type": "E", "payload": "Primary server unavailable, trying to elect new primary"}
+                            return json.dumps([error_response]).encode('utf-8')
             
-            # If we don't know who the primary is, return an error
-            print("ReplicationManager: No primary server available")
-            error_response = {"type": "E", "payload": "No primary server available"}
-            return json.dumps([error_response]).encode('utf-8')
+            # If we don't know who the primary is, wait briefly and retry
+            if attempt < max_retries - 1:
+                print(f"No primary available, waiting and retrying (attempt {attempt + 1}/{max_retries})")
+                time.sleep(retry_delay)
+                continue
+        
+        # If we get here, we've exhausted all retries
+        print("ReplicationManager: No primary server available after all retries")
+        error_response = {"type": "E", "payload": "No primary server available"}
+        return json.dumps([error_response]).encode('utf-8')
     
     def _is_write_operation(self, data: bytes) -> bool:
         """
@@ -210,6 +253,7 @@ class ReplicationManager:
         try:
             json_data = json.loads(data.decode('utf-8'))
             msg_type = json_data.get('type', '')
+            print(f"ReplicationManager: _is_write_operation: msg_type: {msg_type}")
             
             # These operations modify server state
             write_types = ['R', 'M', 'D', 'U', 'W', 'O']  # Register, Message, Delete, etc.
@@ -282,6 +326,7 @@ class ReplicationManager:
             if message_type == "HEARTBEAT":
                 self._handle_heartbeat(message)
             elif message_type == "REQUEST_VOTE":
+                self._remove_dead_primary()
                 response = self._handle_vote_request(message)
                 client_sock.sendall(json.dumps(response).encode('utf-8'))
             elif message_type == "VOTE_RESPONSE":
@@ -306,17 +351,37 @@ class ReplicationManager:
         sender_term = message.get("term", 0)
         sender_id = message.get("server_id", "")
         
+        # Don't process our own heartbeats
+        if sender_id == self.server_id:
+            print(f"Ignoring heartbeat from self ({self.server_id})")
+            return
+            
+        print(f"Handling heartbeat from {sender_id}, term {sender_term}")
+        print(f"Current state before heartbeat - Role: {self.role}, Term: {self.current_term}, Primary: {self.primary_id}")
+        
         with self.state_lock:
-            # If we receive a heartbeat from a server with a higher term,
-            # update our term and recognize it as the primary
-            if sender_term >= self.current_term:
+            # Update last heartbeat time
+            self.last_heartbeat_time = time.time()
+            
+            # Only step down if we receive a higher term
+            if sender_term > self.current_term:
+                print(f"Received higher term {sender_term} > {self.current_term}, stepping down")
                 self.current_term = sender_term
                 self.primary_id = sender_id
                 self.role = ServerRole.BACKUP
                 self.voted_for = None
-                
-                # Add to active replicas
                 self.active_replicas.add(sender_id)
+            elif sender_term == self.current_term:
+                # If we're not PRIMARY, update our primary_id
+                if self.role != ServerRole.PRIMARY:
+                    print(f"Updating primary to {sender_id} for current term")
+                    self.primary_id = sender_id
+                else:
+                    print(f"Ignoring heartbeat - we are PRIMARY for term {self.current_term}")
+            else:
+                print(f"Ignoring heartbeat with lower term {sender_term} < {self.current_term}")
+        
+        print(f"State after heartbeat - Role: {self.role}, Term: {self.current_term}, Primary: {self.primary_id}")
     
     def _handle_vote_request(self, message):
         """
@@ -331,29 +396,38 @@ class ReplicationManager:
         candidate_term = message.get("term", 0)
         candidate_id = message.get("server_id", "")
         
+        print(f"Handling vote request from {candidate_id} for term {candidate_term}")
+        
         with self.vote_lock:
             # If the candidate's term is higher than ours, update our term
             if candidate_term > self.current_term:
+                print(f"Updating term from {self.current_term} to {candidate_term}")
                 self.current_term = candidate_term
                 self.voted_for = None
                 
                 # If we were the primary, step down
                 if self.role == ServerRole.PRIMARY:
+                    print(f"Stepping down from PRIMARY to BACKUP")
                     self.role = ServerRole.BACKUP
                     self.primary_id = None
             
             # Decide whether to vote for the candidate
             vote_granted = False
             if candidate_term >= self.current_term and (self.voted_for is None or self.voted_for == candidate_id):
+                print(f"Voting for {candidate_id}")
                 self.voted_for = candidate_id
                 vote_granted = True
+            else:
+                print(f"Not voting for {candidate_id} (term={candidate_term}, current_term={self.current_term}, voted_for={self.voted_for})")
             
-            return {
+            response = {
                 "type": "VOTE_RESPONSE",
                 "term": self.current_term,
                 "server_id": self.server_id,
                 "vote_granted": vote_granted
             }
+            print(f"Sending vote response: {response}")
+            return response
     
     def _handle_vote_response(self, message):
         """
@@ -366,10 +440,13 @@ class ReplicationManager:
         sender_id = message.get("server_id", "")
         vote_granted = message.get("vote_granted", False)
         
+        print(f"Handling vote response from {sender_id}: term={sender_term}, vote_granted={vote_granted}")
+        
         with self.state_lock:
             # If we're not a candidate or the term has changed, ignore
             if self.role != ServerRole.CANDIDATE or sender_term > self.current_term:
                 if sender_term > self.current_term:
+                    print(f"Updating term from {self.current_term} to {sender_term} due to higher term in vote response")
                     self.current_term = sender_term
                     self.role = ServerRole.BACKUP
                     self.voted_for = None
@@ -377,10 +454,12 @@ class ReplicationManager:
             
             # Count votes if we're still a candidate
             if vote_granted:
+                print(f"Received vote from {sender_id}")
                 self.active_replicas.add(sender_id)
                 
                 # If we have a majority of votes, become the primary
                 if len(self.active_replicas) > len(self.replica_addresses) / 2:
+                    print(f"Received majority of votes ({len(self.active_replicas)}/{len(self.replica_addresses)}), becoming PRIMARY")
                     self.role = ServerRole.PRIMARY
                     self.primary_id = self.server_id
                     print(f"Server {self.server_id} elected as PRIMARY for term {self.current_term}")
@@ -415,7 +494,7 @@ class ReplicationManager:
                     print(f"Applying operation: {operation_data[:100]}...")
                     
                     # Process the operation as if it came from a client
-                    result = self.client_handler(operation_bytes, None)
+                    result = self.client_handler(operation_bytes, None, is_replication=True)
                     
                     # Log the result
                     if result:
@@ -443,27 +522,38 @@ class ReplicationManager:
     def _heartbeat_loop(self):
         """Send heartbeats if this server is the primary."""
         while self.running:
+            should_send_heartbeat = False
+            heartbeat_msg = None
+            
+            # Check if we should send heartbeat under lock
             with self.state_lock:
                 if self.role == ServerRole.PRIMARY:
-                    self._send_heartbeats()
+                    should_send_heartbeat = True
+                    heartbeat_msg = {
+                        "type": "HEARTBEAT",
+                        "term": self.current_term,
+                        "server_id": self.server_id
+                    }
+            
+            # Send heartbeats outside the lock if needed
+            if should_send_heartbeat and heartbeat_msg:
+                self._send_heartbeats(heartbeat_msg)
             
             # Sleep for a short time
             time.sleep(0.5)  # 500ms heartbeat interval
     
-    def _send_heartbeats(self):
+    def _send_heartbeats(self, heartbeat_msg):
         """Send heartbeats to all other servers."""
-        heartbeat_msg = {
-            "type": "HEARTBEAT",
-            "term": self.current_term,
-            "server_id": self.server_id
-        }
+        print(f"Sending heartbeats as PRIMARY for term {heartbeat_msg['term']}")
         
         for replica in self.replica_addresses:
             # Skip self
             if replica == self.local_address:
+                print(f"Skipping heartbeat to self ({self.local_address})")
                 continue
                 
             try:
+                print(f"Sending heartbeat to {replica}")
                 sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
                 sock.settimeout(1)  # 1 second timeout
                 sock.connect(replica)
@@ -475,27 +565,62 @@ class ReplicationManager:
     def _election_timeout_loop(self):
         """Check for election timeout and start election if needed."""
         while self.running:
-            # Only start election if we're a backup and haven't received a heartbeat
+            # Random election timeout between 1.5 and 3 seconds
+            timeout = random.uniform(1.5, 3.0)
+            time.sleep(timeout)
+            
+            should_start_election = False
             with self.state_lock:
+                # Only start election if we're a backup and haven't received a heartbeat
                 if self.role == ServerRole.BACKUP:
-                    # Random election timeout between 1.5 and 3 seconds
-                    timeout = random.uniform(1.5, 3.0)
-                    time.sleep(timeout)
+                    print(f"Server {self.server_id} considering election (current term: {self.current_term})")
+                    print(f"Current replica_addresses: {self.replica_addresses}")
+                    print(f"Current primary_id: {self.primary_id}")
                     
-                    # If we still haven't received a heartbeat, start an election
-                    self._start_election()
+                    # Check if we've received a heartbeat recently (within random timeout)
+                    current_time = time.time()
+                    heartbeat_timeout = random.uniform(1.5, 3.0)  # Random timeout between 1.5 and 3 seconds
+                    if current_time - self.last_heartbeat_time > heartbeat_timeout:
+                        print(f"No heartbeat received for {current_time - self.last_heartbeat_time:.1f} seconds (timeout: {heartbeat_timeout:.1f}s), clearing primary")
+                        self._remove_dead_primary()
+                        self.primary_id = None
+                        should_start_election = True
+                    elif self.primary_id is None:
+                        print("No primary known, will start election")
+                        should_start_election = True
+                    else:
+                        print(f"Have primary {self.primary_id}, skipping election")
                 else:
-                    # If we're already a primary or candidate, just sleep
-                    time.sleep(1)
+                    print(f"Not starting election - current role is {self.role}")
+            
+            # Start election outside the lock if needed
+            if should_start_election:
+                print(f"Starting election outside lock")
+                self._start_election()
+            else:
+                time.sleep(1)  # Sleep outside the lock
     
     def _start_election(self):
         """Start a leader election."""
         with self.state_lock:
+            # Don't start election if we're already PRIMARY
+            if self.role == ServerRole.PRIMARY:
+                print(f"Skipping election start - already PRIMARY")
+                return
+                
+            # Don't start election if we already know about a valid primary
+            if self.primary_id is not None:
+                print(f"Skipping election start - already have primary {self.primary_id}")
+                return
+                
+            print(f"Starting election process for server {self.server_id}")
+            
             # Increment term and vote for self
             self.current_term += 1
             self.voted_for = self.server_id
             self.role = ServerRole.CANDIDATE
             self.active_replicas = {self.server_id}  # Vote for self
+            self.primary_id = None  # Clear primary_id since we're starting an election
             
             print(f"Server {self.server_id} starting election for term {self.current_term}")
         
@@ -512,6 +637,7 @@ class ReplicationManager:
                 continue
                 
             try:
+                print(f"Requesting vote from {replica}")
                 sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
                 sock.settimeout(1)  # 1 second timeout
                 sock.connect(replica)
@@ -521,6 +647,7 @@ class ReplicationManager:
                 response_data = sock.recv(4096)
                 if response_data:
                     response = json.loads(response_data.decode('utf-8'))
+                    print(f"Received vote response from {replica}: {response}")
                     self._handle_vote_response(response)
                 
                 sock.close()
@@ -538,3 +665,49 @@ class ReplicationManager:
             Server ID string
         """
         return f"{address[0]}:{address[1]}"
+    
+    def is_primary(self) -> bool:
+        """Check if this server is the primary."""
+        is_primary = self.role == ServerRole.PRIMARY
+        print(f"ReplicationManager.is_primary: Checking if primary - Role: {self.role}, Result: {is_primary}")
+        return is_primary
+            
+    def get_primary(self) -> Optional[Tuple[str, int]]:
+        """Get the address of the primary server."""
+        if self.primary_id:
+            print(f"ReplicationManager.get_primary: Primary ID is {self.primary_id}")
+            # Find the primary's address
+            for replica in self.replica_addresses:
+                if self._get_server_id_from_address(replica) == self.primary_id:
+                    print(f"ReplicationManager.get_primary: Found primary address {replica}")
+                    return replica
+        print("ReplicationManager.get_primary: No primary found")
+        return None
+    
+    def _remove_dead_primary(self):
+        """Remove the dead primary from replica_addresses if we know who it was."""
+        # Remove dead primary from replica_addresses if we know who it was
+        if self.primary_id:
+            print(f"Attempting to remove dead primary {self.primary_id} from replica_addresses")
+            dead_primary = None
+            # Extract replica number from primary_id (e.g., "replica1" -> "1")
+            primary_number = self.primary_id.replace("replica", "")
+            print(f"Looking for replica number: {primary_number}")
+            
+            for replica in self.replica_addresses:
+                # Extract replica number from address (e.g., "localhost:8081" -> "1")
+                replica_number = str(replica[1] - 8080)  # Convert port to replica number
+                print(f"Checking replica {replica} -> number: {replica_number}")
+                if replica_number == primary_number:
+                    dead_primary = replica
+                    print(f"Found dead primary at {replica}")
+                    break
+            if dead_primary:
+                print(f"Removing dead primary {dead_primary} from replica_addresses")
+                self.replica_addresses.remove(dead_primary)
+                print(f"Updated replica_addresses: {self.replica_addresses}")
+            else:
+                print(f"Could not find dead primary {self.primary_id} in replica_addresses")
+        else:
+            print(f"No primary_id so no dead primary to remove")
+    

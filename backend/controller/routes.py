@@ -48,6 +48,17 @@ class Controller:
         print(f"Client socket: {client_socket}")
         
         try:
+            return replication_manager.handle_client_operation(data)
+        except Exception as e:
+            print(f"Error handling incoming message: {e}")
+            return self.json_protocol.serialize_error(f"Error: {str(e)}")
+
+    
+    def deserialize_message(self, data: bytes, client_socket: socket.socket=None):
+        print(f"Received data: {data}")
+        print(f"Client socket: {client_socket}")
+        
+        try:
             # For JSON, decode the entire message
             decoded_data = json.loads(data.decode('utf-8'))
             msg_type = decoded_data.get('type')
@@ -246,20 +257,23 @@ class Controller:
             print(f"Traceback: {error_traceback}")
             return self.json_protocol.serialize_error(f"Error: {str(e)}")
 
-def handle_client_request(data, client_socket):
+def handle_client_request(data, client_socket, is_replication=False):
     """Handle a client request"""
     global controller, replication_manager
     
     try:
         # Log the incoming request
-        print(f"Received client request: {data[:100]}...")
+        print(f"handle_client_request: Received client request: {data[:100]}...")
+        print(f"handle_client_request: Client socket: {client_socket}")
         
         # Check if we have a primary
-        if not replication_manager.is_primary():
+        print(f"handle_client_request: Checking if we are primary")
+        if not replication_manager.is_primary() and not is_replication:
+            print(f"handle_client_request: We are not primary, forwarding request")
             # We're not the primary, so we need to forward the request to the primary
             primary = replication_manager.get_primary()
             if primary:
-                print(f"Forwarding request to primary: {primary}")
+                print(f"handle_client_request: Forwarding request to primary: {primary}")
                 # Create a socket to the primary
                 s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
                 s.connect(primary)
@@ -275,32 +289,34 @@ def handle_client_request(data, client_socket):
                 return response
             else:
                 # No primary, so we can't process the request
-                print("No primary available to process request")
+                print("handle_client_request: No primary available to process request")
                 error_message = "No primary available to process request. Please try again later."
                 error_bytes = error_message.encode('utf-8')
                 if client_socket:
                     client_socket.sendall(error_bytes)
-                return error_bytes
-        
+                    return error_bytes
+            
         # We are the primary, so we can process the request
-        print("Processing request as primary")
-        response = controller.handle_incoming_message(data, client_socket)
+        if is_replication:
+            print("handle_client_request: Processing request for replication")
+        else:
+            print("handle_client_request: We are primary, processing request")
+        response = controller.deserialize_message(data, client_socket)
+        print(f"handle_client_request: Got response from controller: {response[:100] if response else None}")
         
         return response
     except Exception as e:
+        print(f"handle_client_request: Error handling request: {e}")
+        print("handle_client_request: Full error traceback:")
         import traceback
-        error_traceback = traceback.format_exc()
-        print(f"Error handling client request: {e}")
-        print(f"Traceback: {error_traceback}")
-        
-        # Send an error response to the client
-        error_message = f"Error processing request: {str(e)}"
+        traceback.print_exc()
+        error_message = f"Error handling request: {str(e)}"
         error_bytes = error_message.encode('utf-8')
         if client_socket:
             try:
                 client_socket.sendall(error_bytes)
             except Exception as e:
-                print(f"Error sending error response: {e}")
+                print(f"handle_client_request: Error sending error response: {e}")
         return error_bytes
 
 def start_server():

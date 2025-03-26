@@ -35,11 +35,14 @@ fi
 # Create data directory if it doesn't exist
 mkdir -p $DATA_DIR
 
+# Activate virtual environment
+source backend/replication_env/bin/activate
+
 # Start the server with separate client port if specified
 if [ "$PORT" != "$CLIENT_PORT" ]; then
     echo "Starting server $SERVER_ID with replication port $PORT and client port $CLIENT_PORT"
-    python backend/controller/routes.py --id $SERVER_ID --port $PORT --client-port $CLIENT_PORT --data-dir $DATA_DIR --replicas $REPLICAS
+    python3 backend/controller/routes.py --id $SERVER_ID --port $PORT --client-port $CLIENT_PORT --data-dir $DATA_DIR --replicas $REPLICAS
 else
     echo "Starting server $SERVER_ID with port $PORT"
-    python backend/controller/routes.py --id $SERVER_ID --port $PORT --data-dir $DATA_DIR --replicas $REPLICAS
+    python3 backend/controller/routes.py --id $SERVER_ID --port $PORT --data-dir $DATA_DIR --replicas $REPLICAS
 fi

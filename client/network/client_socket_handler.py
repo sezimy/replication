@@ -39,18 +39,36 @@ class ClientSocketHandler(ClientCommunicationInterface):
             print(f"Error connecting to server: {e}")
             raise
 
-    def reconnect(self) -> bool:
+    def reconnect(self) -> tuple:
+        """Try to reconnect to any available server. Returns (success, new_address)"""
         try:
-            self.server.close()
-            self.server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            self.server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-            self.server.settimeout(10)
-            self.server.connect((self.server.getpeername()[0], self.server.getpeername()[1]))
-            self.server.settimeout(None)
-            return True
+            
+            # Try all ports again
+            host = os.getenv('CHAT_APP_HOST', '0.0.0.0')
+            for port in [8091, 8092, 8093]:
+                try:
+                    print(f"Attempting to reconnect to server at {host}:{port}")
+                    self.server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                    self.server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+                    self.server.settimeout(10)
+                    self.server.connect((host, port))
+                    self.server.settimeout(None)
+                    print(f"Successfully reconnected to {host}:{port}")
+                    return True, (host, port)
+                except Exception as e:
+                    print(f"Failed to reconnect to {host}:{port}: {e}")
+                    if self.server:
+                        try:
+                            self.server.close()
+                        except:
+                            pass
+                        self.server = None
+            
+            print("Failed to reconnect to any server")
+            return False, None
         except Exception as e:
-            print(f"Error reconnecting: {e}")
-            return False
+            print(f"Error in reconnection process: {e}")
+            return False, None
 
     def stop_server(self) -> None:
         self.running = False
@@ -66,10 +84,12 @@ class ClientSocketHandler(ClientCommunicationInterface):
 
     def send_message(self, message: bytes) -> bool:
         """Send a message to the server"""
-        if not self.server:
+        print(f"connect to server")
+        success, new_address = self.reconnect()
+        if not success:
             print("Not connected to server")
             return False
-        
+        print(f"connected to server: {new_address}")
         try:
             print(f"Sending message: {message[:100]}...")
             self.server.sendall(message)
@@ -77,23 +97,12 @@ class ClientSocketHandler(ClientCommunicationInterface):
             return True
         except (socket.error, ConnectionError) as e:
             print(f"Connection error while sending: {e}")
-            # Try to reconnect
-            if self.reconnect():
-                try:
-                    self.server.sendall(message)
-                    print("Message sent successfully after reconnection")
-                    return True
-                except (socket.error, ConnectionError) as e:
-                    print(f"Failed to send message after reconnection: {e}")
-            return False
-        except Exception as e:
-            print(f"Unexpected error sending message: {e}")
-            import traceback
-            traceback.print_exc()
-            return False
 
     def get_message(self, buffer_size: int = 4096) -> bytes:
         """Get a message from the server"""
+        if not self.server:
+            return b''
+        print(f"connected to server: {self.server}")
         try:
             # Set a short timeout to avoid blocking indefinitely
             self.server.settimeout(0.5)
@@ -106,19 +115,3 @@ class ClientSocketHandler(ClientCommunicationInterface):
             return b''
         except (socket.error, ConnectionError) as e:
             print(f"Connection error while receiving: {e}")
-            # Try to reconnect
-            if self.reconnect():
-                try:
-                    data = self.server.recv(buffer_size)
-                    return data
-                except (socket.error, ConnectionError):
-                    pass
-            return b''
-        except Exception as e:
-            print(f"Unexpected error receiving message: {e}")
-            import traceback
-            traceback.print_exc()
-            return b''
-        finally:
-            # Always reset timeout to default
-            self.server.settimeout(None)

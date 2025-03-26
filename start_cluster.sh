@@ -10,6 +10,8 @@ pkill -f "python backend/controller/routes.py" || true
 for PORT in 8081 8082 8083 8091 8092 8093; do
     lsof -ti:$PORT | xargs kill -9 2>/dev/null || true
 done
+# Close any existing terminal windows running our servers
+osascript -e 'tell application "Terminal" to close (every window whose name contains "8081" or name contains "8082" or name contains "8083")' || true
 sleep 3  # Give processes more time to fully terminate
 
 # Define replica information
