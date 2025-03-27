@@ -1,9 +1,16 @@
 [
   {
-    "sender": "Dartmouth",
-    "receiver": "John",
-    "message": "Hello!",
-    "timestamp": "2025-03-27T01:38:38.524099",
-    "_id": "1743053918.524177_0"
+    "sender": "Yale",
+    "receiver": "Harvard",
+    "message": "How are you?",
+    "timestamp": "2025-03-27T02:53:54.712623",
+    "_id": "1743058434.712976_0"
+  },
+  {
+    "sender": "HMS",
+    "receiver": "Yale",
+    "message": "I got into HMS!!!!",
+    "timestamp": "2025-03-27T02:56:02.562418",
+    "_id": "1743058562.563443_1"
   }
 ]

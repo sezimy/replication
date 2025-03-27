@@ -364,11 +364,10 @@ class ReplicationManager:
             if not data:
                 return
 
-            # Try to parse the data as JSON
+            message = json.loads(data.decode('utf-8'))
+            message_type = message.get("type", "")
+            
             try:
-                message = json.loads(data.decode('utf-8'))
-                message_type = message.get("type", "")
-                
                 # Handle replication protocol messages
                 if message_type in ["HEARTBEAT", "REQUEST_VOTE", "VOTE_RESPONSE", "REPLICATE"]:
                     if message_type == "HEARTBEAT":
@@ -385,42 +384,16 @@ class ReplicationManager:
                         response = {"type": "REPLICATE_ACK", "server_id": self.server_id}
                         client_sock.sendall(json.dumps(response).encode('utf-8'))
                 # Handle client requests forwarded from backup servers
-                elif message_type in ["R", "L", "C", "V", "U", "G"]:
-                    print(f"PRIMARY received forwarded client request of type '{message_type}'")
-                    
-                    # Process the client request using the client handler
-                    if self.role == ServerRole.PRIMARY:
-                        try:
-                            print(f"Processing forwarded client request as PRIMARY")
-                            response = self.client_handler(data, None, is_replication=True)
-                            print(f"Generated response for forwarded request: {response[:100] if response else 'None'}")
-                            
-                            # Send the response back to the backup server
-                            if response:
-                                client_sock.sendall(response)
-                            else:
-                                # Create a default success response if none was returned
-                                success_response = {"type": "S", "payload": "Operation processed successfully"}
-                                client_sock.sendall(json.dumps([success_response]).encode('utf-8'))
-                        except Exception as e:
-                            print(f"Error processing forwarded client request: {e}")
-                            import traceback
-                            traceback.print_exc()
-                            # Send error response back to the backup server
-                            error_response = {"type": "E", "payload": f"Error processing request: {str(e)}"}
-                            client_sock.sendall(json.dumps([error_response]).encode('utf-8'))
-                    else:
-                        print(f"Cannot process forwarded request - not PRIMARY (current role: {self.role})")
-                        error_response = {"type": "E", "payload": "Server is not the primary"}
-                        client_sock.sendall(json.dumps([error_response]).encode('utf-8'))
+                elif message_type in ["R", "L", "C", "V", "U", "G", "M", "D"]:
+                    response = self.handle_client_operation(data, client_sock)
+                    client_sock.sendall(response)
                 else:
                     print(f"Unknown message type: {message_type}")
+
             except json.JSONDecodeError as e:
-                print(f"Error decoding JSON from replication connection: {e}")
+                    print(f"Error decoding JSON from replication connection: {e}")
         except Exception as e:
             print(f"Error handling replication connection: {e}")
-            import traceback
-            traceback.print_exc()
         finally:
             client_sock.close()
     
@@ -816,52 +789,3 @@ class ReplicationManager:
                 print(f"Could not find dead primary {self.primary_id} in replica_addresses")
         else:
             print(f"No primary_id so no dead primary to remove")
-
-    def forward_operation(self, data, client_socket=None, is_replication=False):
-        """
-        Process a client operation that has been forwarded from a backup server.
-        
-        Args:
-            data: The client request data
-            client_socket: The client socket (may be None for forwarded requests)
-            is_replication: Whether this is a replication request
-            
-        Returns:
-            Response bytes to send back to the client
-        """
-        print(f"ReplicationManager.forward_operation: Processing forwarded client request")
-        
-        try:
-            # Check if we are the primary
-            if self.role != ServerRole.PRIMARY:
-                print("ReplicationManager.forward_operation: We are not the primary, cannot process forwarded request")
-                error_response = {"type": "E", "payload": "Server is not the primary, cannot process request"}
-                return json.dumps([error_response]).encode('utf-8')
-            
-            # Process the operation using the client handler
-            print(f"ReplicationManager.forward_operation: Processing operation as primary")
-            response = self.client_handler(data, client_socket, is_replication=True)
-            
-            # For write operations, replicate to backups
-            if self._is_write_operation(data):
-                print("ReplicationManager.forward_operation: This is a write operation, replicating to backups")
-                self._replicate_operation(data)
-            
-            print(f"ReplicationManager.forward_operation: Operation processed successfully, response length: {len(response) if response else 0}")
-            if response:
-                print(f"ReplicationManager.forward_operation: Response content: {response[:100]}")
-            
-            # Ensure we have a valid response
-            if not response:
-                print("ReplicationManager.forward_operation: No response from client_handler, creating default success response")
-                success_response = {"type": "S", "payload": "Operation processed successfully"}
-                response = json.dumps([success_response]).encode('utf-8')
-            
-            return response
-        except Exception as e:
-            print(f"ReplicationManager.forward_operation: Error processing operation: {e}")
-            print("ReplicationManager.forward_operation: Full error traceback:")
-            import traceback
-            traceback.print_exc()
-            error_response = {"type": "E", "payload": f"Error processing request: {str(e)}"}
-            return json.dumps([error_response]).encode('utf-8')

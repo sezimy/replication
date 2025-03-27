@@ -1,1 +1,16 @@
-[]
+[
+  {
+    "sender": "Yale",
+    "receiver": "Harvard",
+    "message": "How are you?",
+    "timestamp": "2025-03-27T02:53:54.715294",
+    "_id": "1743058434.715609_0"
+  },
+  {
+    "sender": "HMS",
+    "receiver": "Yale",
+    "message": "I got into HMS!!!!",
+    "timestamp": "2025-03-27T02:56:02.558546",
+    "_id": "1743058562.558929_1"
+  }
+]

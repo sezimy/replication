@@ -1,62 +1,12 @@
 [
   {
-    "user_name": "Sezim737",
-    "user_password": {
-      "__type__": "bytes",
-      "data": "JDJiJDEyJFh3TUZFSmJjTkZMR2swMFVZZGplWk9NVGwwQ0pabi42Z0tIRTAxYy9sRVdDb3NEbzE0cGJD"
-    },
-    "view_count": 5,
-    "log_off_time": null,
-    "_id": "1743019659.255753_0"
-  },
-  {
-    "user_name": "TESTSTST",
-    "user_password": {
-      "__type__": "bytes",
-      "data": "JDJiJDEyJDlrQzdFSm5FR1M5L09Ha29ULnRUTE9LSEVWcURHVlhIeG9hSlhQOURoTG0yVC8wSW1Vd21D"
-    },
-    "view_count": 5,
-    "log_off_time": null,
-    "_id": "1743020282.619967_1"
-  },
-  {
-    "user_name": "John",
-    "user_password": {
-      "__type__": "bytes",
-      "data": "JDJiJDEyJEhodTFwcXM4bUlPOVE1enZ3bDBFNk8uY2RReEJWYWVWQThKTll4Y0JRMnRESUJRSHFvY3Yy"
-    },
-    "view_count": 5,
-    "log_off_time": null,
-    "_id": "1743053713.392256_2"
-  },
-  {
     "user_name": "Harvard",
     "user_password": {
       "__type__": "bytes",
-      "data": "JDJiJDEyJHcyZHFLYllYbUwwcWhXT3AxV0ZuSWVhL1k2dU9IWkdkNWJmRWdGak9JTTR1NEYvaG5jS1Zx"
+      "data": "JDJiJDEyJHRjcDViaWp1WHMzcjdCdG9jV0RIQ082MFpvSk9hR1JlR2VCOVpzR3VPaXlrVEFhaHFiTDV1"
     },
     "view_count": 5,
     "log_off_time": null,
-    "_id": "1743054581.569281_3"
-  },
-  {
-    "user_name": "Harvard",
-    "user_password": {
-      "__type__": "bytes",
-      "data": "JDJiJDEyJFpCS251dFdFWlBIMnhmSnVEYWZrWS5GNHh0OHh4eGV0STMxdVEvdEM3VGZMMHl4bnJtU0Jp"
-    },
-    "view_count": 5,
-    "log_off_time": null,
-    "_id": "1743054585.925953_4"
-  },
-  {
-    "user_name": "NEWNEWNEW",
-    "user_password": {
-      "__type__": "bytes",
-      "data": "JDJiJDEyJGE3STNHcnRRZEJsOXplbmNZbUtKdXVlakdCZmpMSW55dEY0cGhuVXJ5WEkvcU5HM25CWFFP"
-    },
-    "view_count": 5,
-    "log_off_time": null,
-    "_id": "1743055240.844835_5"
+    "_id": "1743058347.801113_0"
   }
 ]
