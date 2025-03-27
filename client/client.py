@@ -30,11 +30,17 @@ class ClientApp:
         # Choose communication handler based on protocol
         self.comm_handler = communication_interface
         
-        host = os.getenv('CHAT_APP_HOST', '0.0.0.0')
+        # Get host from environment variable with fallback
+        host = os.getenv('CLIENT_HOST', '0.0.0.0')
+        
+        # Get client ports from environment variables with fallbacks
+        client_port1 = int(os.getenv('CLIENT_PORT1', '8091'))
+        client_port2 = int(os.getenv('CLIENT_PORT2', '8092'))
+        client_port3 = int(os.getenv('CLIENT_PORT3', '8093'))
         
         # Try connecting to each replica server in order
         connected = False
-        for port in [8091, 8092, 8093]:  # Try all replica client ports
+        for port in [client_port1, client_port2, client_port3]:  # Try all replica client ports
             try:
                 print(f"Trying to connect to server at {host}:{port}")
                 self.comm_handler.start_server(host, port)

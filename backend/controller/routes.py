@@ -276,10 +276,15 @@ def handle_client_request(data, client_socket, is_replication=False):
         
         # Check if we have a primary
         print(f"handle_client_request: Checking if we are primary")
-        if not replication_manager.is_primary() and not is_replication:
+        is_primary = replication_manager.is_primary()
+        print(f"handle_client_request: is_primary result: {is_primary}")
+        
+        if not is_primary and not is_replication:
             print(f"handle_client_request: We are not primary, forwarding request")
             # We're not the primary, so we need to forward the request to the primary
             primary = replication_manager.get_primary()
+            print(f"handle_client_request: get_primary result: {primary}")
+            
             if primary:
                 print(f"handle_client_request: Forwarding request to primary: {primary}")
                 # Create a socket to the primary
@@ -331,7 +336,7 @@ def start_server():
     global controller, replication_manager, socket_handler, running, args
     parser = argparse.ArgumentParser(description='Start a chat server with replication')
     parser.add_argument('--id', type=str, required=True, help='Unique server ID')
-    parser.add_argument('--host', type=str, default='0.0.0.0', help='Host to bind to')
+    parser.add_argument('--host', type=str, default='localhost', help='Host to bind to')
     parser.add_argument('--port', type=int, required=True, help='Replication port')
     parser.add_argument('--client-port', type=int, required=True, help='Client port')
     parser.add_argument('--data-dir', type=str, required=True, help='Data directory')

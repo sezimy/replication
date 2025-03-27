@@ -7,13 +7,24 @@ import os
 sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(__file__)))) # add parent directory to python path
 from interfaces.client_communication_interface import ClientCommunicationInterface
 
-# Define server addresses with their actual IPs
-SERVER_ADDRESSES = [
-    ('10.250.103.230', 8091),  # Replace with actual IP of server 1
-    ('10.250.103.230', 8092),  # Replace with actual IP of server 2
-    ('10.250.145.247', 8093),  # Race with actual IP of server 3
-       
-]
+# Define server addresses from environment variables with fallbacks
+def get_server_addresses():
+    server1_ip = os.getenv('SERVER1_IP', '10.250.145.247')
+    server2_ip = os.getenv('SERVER2_IP', '10.250.145.247')
+    server3_ip = os.getenv('SERVER3_IP', '10.250.145.247')
+    
+    client_port1 = int(os.getenv('CLIENT_PORT1', '8091'))
+    client_port2 = int(os.getenv('CLIENT_PORT2', '8092'))
+    client_port3 = int(os.getenv('CLIENT_PORT3', '8093'))
+    
+    return [
+        (server1_ip, client_port1),
+        (server2_ip, client_port2),
+        (server3_ip, client_port3),
+    ]
+
+# Get server addresses when module is loaded
+SERVER_ADDRESSES = get_server_addresses()
 
 class ClientSocketHandler(ClientCommunicationInterface):
         

@@ -158,79 +158,118 @@ class ReplicationManager:
                 for thread in threading.enumerate():
                     print(f"  - {thread.name}")
             
-            with self.state_lock:
-                print(f"ReplicationManager: Successfully acquired lock")
-                
-                # If this server is the primary, process the operation
-                if self.role == ServerRole.PRIMARY:
-                    print(f"ReplicationManager: This server ({self.server_id}) is PRIMARY, processing locally")
-                    # Process the operation locally
-                    try:
-                        # Extract the message type for logging
-                        try:
-                            msg_type = data.decode('utf-8')[2:3]  # Usually the message type is at position 2
-                            print(f"ReplicationManager: Processing operation of type '{msg_type}'")
-                        except:
-                            print("ReplicationManager: Could not extract message type")
-                        
-                        print("ReplicationManager: About to call client_handler")
-                        print(f"ReplicationManager: client_handler type: {type(self.client_handler)}")
-                        response = self.client_handler(data, client_socket)
-                        print(f"ReplicationManager: client_handler returned response type: {type(response)}")
-                        
-                        # For write operations, replicate to backups
-                        if self._is_write_operation(data):
-                            print("ReplicationManager: This is a write operation, replicating to backups")
-                            self._replicate_operation(data)
-                        
-                        print(f"ReplicationManager: Operation processed successfully, response length: {len(response) if response else 0}")
-                        if response:
-                            print(f"ReplicationManager: Response content: {response[:100]}")
-                        return response
-                    except Exception as e:
-                        print(f"ReplicationManager: Error processing operation: {e}")
-                        print("ReplicationManager: Full error traceback:")
-                        import traceback
-                        traceback.print_exc()
-                        error_response = {"type": "E", "payload": f"Error processing request: {str(e)}"}
-                        return json.dumps([error_response]).encode('utf-8')
-                
-                # If this server knows who the primary is, forward the request
-                elif self.primary_id is not None:
-                    print(f"ReplicationManager: This server is BACKUP, forwarding to PRIMARY ({self.primary_id})")
-                    # Find the primary's address
-                    primary_address = None
-                    print(f"ReplicationManager: Replica addresses: {self.replica_addresses}")
-                    for replica in self.replica_addresses:
-                        print(f"ReplicationManager: Replica address: {replica}")
-                        print(f"primary_id: {self.primary_id}")
-                        if self._get_server_id_from_address(replica) == self.primary_id:
-                            primary_address = replica
-                            break
+            try:
+                with self.state_lock:
+                    print(f"ReplicationManager: Successfully acquired lock")
                     
-                    if primary_address:
-                        # Forward the request to the primary
+                    # If this server is the primary, process the operation
+                    if self.role == ServerRole.PRIMARY:
+                        print(f"ReplicationManager: This server ({self.server_id}) is PRIMARY, processing locally")
+                        # Process the operation locally
                         try:
-                            print(f"ReplicationManager: Forwarding request to primary at {primary_address}")
-                            client_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-                            client_sock.settimeout(5)  # 5 second timeout
-                            client_sock.connect(primary_address)
-                            client_sock.sendall(data)
-                            response = client_sock.recv(4096)
-                            client_sock.close()
-                            print(f"ReplicationManager: Received response from primary, length: {len(response)}")
+                            # Extract the message type for logging
+                            try:
+                                msg_type = data.decode('utf-8')[2:3]  # Usually the message type is at position 2
+                                print(f"ReplicationManager: Processing operation of type '{msg_type}'")
+                            except:
+                                print("ReplicationManager: Could not extract message type")
+                            
+                            print("ReplicationManager: About to call client_handler")
+                            print(f"ReplicationManager: client_handler type: {type(self.client_handler)}")
+                            response = self.client_handler(data, client_socket)
+                            print(f"ReplicationManager: client_handler returned response type: {type(response)}")
+                            
+                            # For write operations, replicate to backups
+                            if self._is_write_operation(data):
+                                print("ReplicationManager: This is a write operation, replicating to backups")
+                                self._replicate_operation(data)
+                            
+                            print(f"ReplicationManager: Operation processed successfully, response length: {len(response) if response else 0}")
+                            if response:
+                                print(f"ReplicationManager: Response content: {response[:100]}")
+                            
+                            # Ensure we have a valid response
+                            if not response:
+                                print("ReplicationManager: No response from client_handler, creating default success response")
+                                success_response = {"type": "S", "payload": "Operation processed successfully"}
+                                response = json.dumps([success_response]).encode('utf-8')
+                            
                             return response
                         except Exception as e:
-                            print(f"ReplicationManager: Error forwarding to primary: {e}")
-                            if attempt < max_retries - 1:
-                                print(f"Retrying after error (attempt {attempt + 1}/{max_retries})")
-                                # Primary might be down, start a new election
-                                self._start_election()
-                                time.sleep(retry_delay)
-                                continue
-                            # Return error to client on last attempt
-                            error_response = {"type": "E", "payload": "Primary server unavailable, trying to elect new primary"}
+                            print(f"ReplicationManager: Error processing operation: {e}")
+                            print("ReplicationManager: Full error traceback:")
+                            import traceback
+                            traceback.print_exc()
+                            error_response = {"type": "E", "payload": f"Error processing request: {str(e)}"}
                             return json.dumps([error_response]).encode('utf-8')
+                    
+                    # If this server knows who the primary is, forward the request
+                    elif self.primary_id is not None:
+                        print(f"ReplicationManager: This server is BACKUP, forwarding to PRIMARY ({self.primary_id})")
+                        # Find all potential primary addresses
+                        potential_primary_addresses = []
+                        print(f"ReplicationManager: Replica addresses: {self.replica_addresses}")
+                        for replica in self.replica_addresses:
+                            print(f"ReplicationManager: Checking replica address: {replica}")
+                            server_id = self._get_server_id_from_address(replica)
+                            print(f"ReplicationManager: Server ID: {server_id}, primary_id: {self.primary_id}")
+                            if server_id == self.primary_id:
+                                potential_primary_addresses.append(replica)
+                        
+                        print(f"ReplicationManager: Found {len(potential_primary_addresses)} potential primary addresses: {potential_primary_addresses}")
+                        
+                        if potential_primary_addresses:
+                            # Try each potential primary address
+                            connection_successful = False
+                            last_error = None
+                            
+                            for primary_address in potential_primary_addresses:
+                                # Forward the request to the primary
+                                try:
+                                    print(f"ReplicationManager: Attempting to forward request to primary at {primary_address}")
+                                    client_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                                    client_sock.settimeout(5)  # 5 second timeout
+                                    client_sock.connect(primary_address)
+                                    client_sock.sendall(data)
+                                    response = client_sock.recv(4096)
+                                    client_sock.close()
+                                    print(f"ReplicationManager: Received response from primary, length: {len(response)}")
+                                    
+                                    # Ensure we have a valid response
+                                    if not response or len(response) == 0:
+                                        print("ReplicationManager: Empty response from primary, creating default success response")
+                                        success_response = {"type": "S", "payload": "Operation forwarded to primary"}
+                                        response = json.dumps([success_response]).encode('utf-8')
+                                    
+                                    connection_successful = True
+                                    return response
+                                except Exception as e:
+                                    last_error = e
+                                    print(f"ReplicationManager: Error forwarding to primary at {primary_address}: {e}")
+                                    # Continue to the next potential primary address
+                            
+                            # If we tried all potential primary addresses and none worked
+                            if not connection_successful:
+                                print(f"ReplicationManager: All connection attempts to primary failed. Last error: {last_error}")
+                                # Primary might be down, clear primary_id and start a new election
+                                self.primary_id = None
+                                self._start_election()
+                                
+                                if attempt < max_retries - 1:
+                                    print(f"Retrying after all connection attempts failed (attempt {attempt + 1}/{max_retries})")
+                                    # Break out of the with block to release the lock
+                                    break
+                                # Return error to client on last attempt
+                                error_response = {"type": "E", "payload": "Primary server unavailable, trying to elect new primary"}
+                                return json.dumps([error_response]).encode('utf-8')
+            except Exception as e:
+                print(f"ReplicationManager: Error acquiring lock: {e}")
+                if attempt < max_retries - 1:
+                    print(f"Retrying after lock error (attempt {attempt + 1}/{max_retries})")
+                    time.sleep(retry_delay)
+                    continue
+                error_response = {"type": "E", "payload": f"Internal server error: {str(e)}"}
+                return json.dumps([error_response]).encode('utf-8')
             
             # If we don't know who the primary is, wait briefly and retry
             if attempt < max_retries - 1:
@@ -304,6 +343,7 @@ class ReplicationManager:
         while self.running:
             try:
                 client_sock, addr = self.replication_socket.accept()
+                print(f"PRIMARY received connection from {addr}")  #
                 threading.Thread(target=self._handle_replication_connection, 
                                 args=(client_sock, addr)).start()
             except Exception as e:
@@ -320,27 +360,67 @@ class ReplicationManager:
         """
         try:
             data = client_sock.recv(4096)
+            print(f"PRIMARY received data: {data}")
             if not data:
                 return
+
+            # Try to parse the data as JSON
+            try:
+                message = json.loads(data.decode('utf-8'))
+                message_type = message.get("type", "")
                 
-            message = json.loads(data.decode('utf-8'))
-            message_type = message.get("type", "")
-            
-            if message_type == "HEARTBEAT":
-                self._handle_heartbeat(message)
-            elif message_type == "REQUEST_VOTE":
-                self._remove_dead_primary()
-                response = self._handle_vote_request(message)
-                client_sock.sendall(json.dumps(response).encode('utf-8'))
-            elif message_type == "VOTE_RESPONSE":
-                self._handle_vote_response(message)
-            elif message_type == "REPLICATE":
-                self._handle_replication(message)
-                # Send acknowledgment
-                response = {"type": "REPLICATE_ACK", "server_id": self.server_id}
-                client_sock.sendall(json.dumps(response).encode('utf-8'))
+                # Handle replication protocol messages
+                if message_type in ["HEARTBEAT", "REQUEST_VOTE", "VOTE_RESPONSE", "REPLICATE"]:
+                    if message_type == "HEARTBEAT":
+                        self._handle_heartbeat(message)
+                    elif message_type == "REQUEST_VOTE":
+                        self._remove_dead_primary()
+                        response = self._handle_vote_request(message)
+                        client_sock.sendall(json.dumps(response).encode('utf-8'))
+                    elif message_type == "VOTE_RESPONSE":
+                        self._handle_vote_response(message)
+                    elif message_type == "REPLICATE":
+                        self._handle_replication(message)
+                        # Send acknowledgment
+                        response = {"type": "REPLICATE_ACK", "server_id": self.server_id}
+                        client_sock.sendall(json.dumps(response).encode('utf-8'))
+                # Handle client requests forwarded from backup servers
+                elif message_type in ["R", "L", "C", "V", "U", "G"]:
+                    print(f"PRIMARY received forwarded client request of type '{message_type}'")
+                    
+                    # Process the client request using the client handler
+                    if self.role == ServerRole.PRIMARY:
+                        try:
+                            print(f"Processing forwarded client request as PRIMARY")
+                            response = self.client_handler(data, None, is_replication=True)
+                            print(f"Generated response for forwarded request: {response[:100] if response else 'None'}")
+                            
+                            # Send the response back to the backup server
+                            if response:
+                                client_sock.sendall(response)
+                            else:
+                                # Create a default success response if none was returned
+                                success_response = {"type": "S", "payload": "Operation processed successfully"}
+                                client_sock.sendall(json.dumps([success_response]).encode('utf-8'))
+                        except Exception as e:
+                            print(f"Error processing forwarded client request: {e}")
+                            import traceback
+                            traceback.print_exc()
+                            # Send error response back to the backup server
+                            error_response = {"type": "E", "payload": f"Error processing request: {str(e)}"}
+                            client_sock.sendall(json.dumps([error_response]).encode('utf-8'))
+                    else:
+                        print(f"Cannot process forwarded request - not PRIMARY (current role: {self.role})")
+                        error_response = {"type": "E", "payload": "Server is not the primary"}
+                        client_sock.sendall(json.dumps([error_response]).encode('utf-8'))
+                else:
+                    print(f"Unknown message type: {message_type}")
+            except json.JSONDecodeError as e:
+                print(f"Error decoding JSON from replication connection: {e}")
         except Exception as e:
             print(f"Error handling replication connection: {e}")
+            import traceback
+            traceback.print_exc()
         finally:
             client_sock.close()
     
@@ -672,13 +752,18 @@ class ReplicationManager:
         Returns:
             Server ID string
         """
-        SERVER_ADDRESSES = {
-            ('10.250.103.230', 8081): "replica1",  # Replace with actual IP of server 1
-            ('10.250.103.230', 8082): "replica2",  # Replace with actual IP of server 2
-            ('10.250.145.247', 8083): "replica3"   # Replace with actual IP of server 3
+        # Map ports to server IDs regardless of host
+        # This allows for both localhost and IP address connections
+        PORT_TO_SERVER_ID = {
+            8081: "replica1",
+            8082: "replica2",
+            8083: "replica3"
         }
-        return SERVER_ADDRESSES.get(given_address, None)
-    
+        
+        # Get server ID based on port number
+        _, port = given_address
+        return PORT_TO_SERVER_ID.get(port, None)
+        
     def is_primary(self) -> bool:
         """Check if this server is the primary."""
         is_primary = self.role == ServerRole.PRIMARY
@@ -687,11 +772,19 @@ class ReplicationManager:
             
     def get_primary(self) -> Optional[Tuple[str, int]]:
         """Get the address of the primary server."""
+        # If we are the primary, return our own address
+        if self.role == ServerRole.PRIMARY:
+            print(f"ReplicationManager.get_primary: We are PRIMARY, returning our address {self.local_address}")
+            return self.local_address
+            
+        # Otherwise, try to find the primary's address
         if self.primary_id:
             print(f"ReplicationManager.get_primary: Primary ID is {self.primary_id}")
             # Find the primary's address
             for replica in self.replica_addresses:
-                if self._get_server_id_from_address(replica) == self.primary_id:
+                server_id = self._get_server_id_from_address(replica)
+                print(f"ReplicationManager.get_primary: Checking replica {replica} with ID {server_id}")
+                if server_id == self.primary_id:
                     print(f"ReplicationManager.get_primary: Found primary address {replica}")
                     return replica
         print("ReplicationManager.get_primary: No primary found")
@@ -723,4 +816,52 @@ class ReplicationManager:
                 print(f"Could not find dead primary {self.primary_id} in replica_addresses")
         else:
             print(f"No primary_id so no dead primary to remove")
-    
+
+    def forward_operation(self, data, client_socket=None, is_replication=False):
+        """
+        Process a client operation that has been forwarded from a backup server.
+        
+        Args:
+            data: The client request data
+            client_socket: The client socket (may be None for forwarded requests)
+            is_replication: Whether this is a replication request
+            
+        Returns:
+            Response bytes to send back to the client
+        """
+        print(f"ReplicationManager.forward_operation: Processing forwarded client request")
+        
+        try:
+            # Check if we are the primary
+            if self.role != ServerRole.PRIMARY:
+                print("ReplicationManager.forward_operation: We are not the primary, cannot process forwarded request")
+                error_response = {"type": "E", "payload": "Server is not the primary, cannot process request"}
+                return json.dumps([error_response]).encode('utf-8')
+            
+            # Process the operation using the client handler
+            print(f"ReplicationManager.forward_operation: Processing operation as primary")
+            response = self.client_handler(data, client_socket, is_replication=True)
+            
+            # For write operations, replicate to backups
+            if self._is_write_operation(data):
+                print("ReplicationManager.forward_operation: This is a write operation, replicating to backups")
+                self._replicate_operation(data)
+            
+            print(f"ReplicationManager.forward_operation: Operation processed successfully, response length: {len(response) if response else 0}")
+            if response:
+                print(f"ReplicationManager.forward_operation: Response content: {response[:100]}")
+            
+            # Ensure we have a valid response
+            if not response:
+                print("ReplicationManager.forward_operation: No response from client_handler, creating default success response")
+                success_response = {"type": "S", "payload": "Operation processed successfully"}
+                response = json.dumps([success_response]).encode('utf-8')
+            
+            return response
+        except Exception as e:
+            print(f"ReplicationManager.forward_operation: Error processing operation: {e}")
+            print("ReplicationManager.forward_operation: Full error traceback:")
+            import traceback
+            traceback.print_exc()
+            error_response = {"type": "E", "payload": f"Error processing request: {str(e)}"}
+            return json.dumps([error_response]).encode('utf-8')
